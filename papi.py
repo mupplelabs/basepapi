@@ -52,8 +52,8 @@ class basepapi:
     class papiConnectionError(papiException) :
         def __init__(self, rObject) :
             if isinstance(rObject, requests.models.ConnectionError) :
-                    if isinstance(rObject.errno, int) :
-                        self.status = rObject.errno
+                    if isinstance(rObject.response.status_code, int) :
+                        self.status = rObject.response.status_code
                     else :
                         self.status = dir(rObject)
                     self.text = str(rObject)
@@ -63,8 +63,8 @@ class basepapi:
     class papiError(papiException) :
         def __init__(self, rObject) :
             if isinstance(rObject, requests.models.HTTPError) :
-                    if isinstance(rObject.errno, int) :
-                        self.status = rObject.errno
+                    if isinstance(rObject.response.status_code, int) :
+                        self.status = rObject.response.status_code
                     else :
                         self.status = dir(rObject)
                     self.text = str(rObject)

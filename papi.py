@@ -71,7 +71,7 @@ class basepapi:
             else :
                 raise TypeError("Input data of wrong type!")
 
-    def __init__(self, HOST, username, password, port=8080, timeout=15, secure=False, papiService = 'platform'):
+    def __init__(self, HOST, username, password, port=8080, timeout=15, secure=False, papiService = 'platform', papiAgent = "OneFS PlatformAPI Client for Python"):
         # Data needed for Session Authentication:
         self.__auth = {
             'username': username,
@@ -95,7 +95,7 @@ class basepapi:
 
         #Prepare and create HTTPS Requests session object
         self.__session = requests.Session()
-        self.__session.headers.update({'content-type': 'application/json'})
+        self.__session.headers.update({'content-type': 'application/json', 'User-Agent': papiAgent})
         self.__session.verify = secure
      
         # disable warnings on non secure certificates if ssl verification is turned off

@@ -11,8 +11,8 @@
 # 
 # Example Usage: 
 # 
-# import papi as r
-# papi = r.papi('ClusterIP', 'Username', 'Password') 
+# from papi import basepapi
+# papi = basepapi('ClusterIP', 'Username', 'Password') 
 # response = papi.get('/1/cluster/identity')
 # print(response.body)
 #
@@ -52,13 +52,10 @@ class basepapi:
     class papiConnectionError(papiException) :
         def __init__(self, rObject) :
             if isinstance(rObject, requests.models.ConnectionError) :
-                    if isinstance(rObject.response.status_code, int) :
-                        self.status = rObject.response.status_code
-                    else :
-                        self.status = dir(rObject)
+                    self.status = rObject
                     self.text = str(rObject)
             else :
-                raise TypeError("Input data of wrong type!")
+                raise TypeError("Unhandled connection error condition occured!")
 
     class papiError(papiException) :
         def __init__(self, rObject) :
@@ -66,12 +63,12 @@ class basepapi:
                     if isinstance(rObject.response.status_code, int) :
                         self.status = rObject.response.status_code
                     else :
-                        self.status = dir(rObject)
+                        self.status = rObject
                     self.text = str(rObject)
             else :
-                raise TypeError("Input data of wrong type!")
+                raise TypeError("Unhandled HTTP Error condition occured!")
 
-    def __init__(self, HOST, username, password, port=8080, timeout=15, secure=False, papiService = 'platform', papiAgent = "OneFS PlatformAPI Client for Python"):
+    def __init__(self, HOST, username, password, port=8080, timeout=15, secure=False, papiService = 'platform', papiAgent = 'basePAPI Client for Python'):
         # Data needed for Session Authentication:
         self.__auth = {
             'username': username,
@@ -95,7 +92,8 @@ class basepapi:
 
         #Prepare and create HTTPS Requests session object
         self.__session = requests.Session()
-        self.__session.headers.update({'content-type': 'application/json', 'User-Agent': papiAgent})
+        self.__session.headers.update({'content-type': 'application/json'})
+        self.__session.headers.update({'User-Agent': papiAgent})
         self.__session.verify = secure
      
         # disable warnings on non secure certificates if ssl verification is turned off
@@ -154,8 +152,6 @@ class basepapi:
         # if not already connected create the session to OneFS
         if(not self.connected): # connect
             self.connect()
-        # are we autorized to access the rquired ressource?
-        #if service in self.services :
         # create and send the request:
         myurl = self.url + self.papiService + uri
         if headers and isinstance(headers, dict) : # Add headers if specified... MUST be a dict!!!
@@ -168,6 +164,8 @@ class basepapi:
             myStatus = self.papiConnectionError(e)
             raise myStatus
         except requests.exceptions.HTTPError as e :
+            if self.connected and e.response.status_code == 401 :
+                self.connected = False
             myStatus = self.papiError(e)
             raise myStatus
         # clean up the response if successfull call

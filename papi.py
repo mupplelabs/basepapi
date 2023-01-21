@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 # BasePAPI Class for simple OneFS Platform API interaction
 #
-# Copyright C 2002-2022 by DELL Technologies. All rights are reserved.
-# Isilon and Isilon Systems are registered trademarks of Dell Technologies.
-#
 # To be used to simplify papi access from remote, without the need of a full SDK.
 # 
 # Requires: requests library
@@ -28,9 +25,6 @@
 
 import requests
 import json
-from requests import exceptions
-
-from requests.sessions import session
 
 class basepapi:
     class PapiResponse :
@@ -68,7 +62,7 @@ class basepapi:
             else :
                 raise TypeError("Unhandled HTTP Error condition occured!")
 
-    def __init__(self, HOST, username, password, port=8080, timeout=15, secure=False, papiService = 'platform', papiAgent = "OneFS PlatformAPI Client for Python"):
+    def __init__(self, HOST, username, password, port=8080, timeout=15, secure=False, papiService = 'platform', papiAgent = 'basePAPI Client for Python'):
         # Data needed for Session Authentication:
         self.__auth = {
             'username': username,
@@ -92,7 +86,8 @@ class basepapi:
 
         #Prepare and create HTTPS Requests session object
         self.__session = requests.Session()
-        self.__session.headers.update({'content-type': 'application/json', 'User-Agent': papiAgent})
+        self.__session.headers.update({'content-type': 'application/json'})
+        self.__session.headers.update({'User-Agent': papiAgent})
         self.__session.verify = secure
      
         # disable warnings on non secure certificates if ssl verification is turned off
@@ -147,12 +142,13 @@ class basepapi:
     
     # the private function that does the actual work...
 
-    def __request(self, method, uri, body={}, args={}, headers={} ) :
+    def __request(self, method, uri, body={}, args={}, headers={}, serviceOverwrite = None ) :
         # if not already connected create the session to OneFS
         if(not self.connected): # connect
             self.connect()
         # create and send the request:
-        myurl = self.url + self.papiService + uri
+        thisService = {0: self.papiService, 1: serviceOverwrite}[serviceOverwrite in ['namespace', 'platform']] 
+        myurl = self.url + thisService + uri
         if headers and isinstance(headers, dict) : # Add headers if specified... MUST be a dict!!!
             self.__session.headers.update(headers)
             # shall we validate the header format? and add error handling here?
@@ -179,22 +175,30 @@ class basepapi:
 
     #   define actual methods for PUT, POST, GET, HEAD and DELETE
 
-    def get(self, uri, body=None, args=None, headers={}): 
-        pResponse = self.__request('GET', uri, body, args, headers)
+    def get(self, uri, body=None, args=None, headers={}, serviceOverwrite=None): 
+        pResponse = self.__request('GET', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def put(self, uri, body=None, args=None, headers={}):
-        pResponse = self.__request('PUT', uri, body, args, headers)
+    def put(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+        pResponse = self.__request('PUT', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def head(self, uri, body=None, args=None, headers={}):
-        pResponse = self.__request('HEAD', uri, body, args, headers)
+    def head(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+        pResponse = self.__request('HEAD', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def post(self, uri, body=None, args=None, headers={}):
-        pResponse = self.__request('POST', uri, body, args, headers)
+    def post(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+        pResponse = self.__request('POST', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def delete(self, uri, body=None, args=None, headers={}):
-        pResponse = self.__request('DELETE', uri, body, args, headers)
+    def delete(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+        pResponse = self.__request('DELETE', uri, body, args, headers, serviceOverwrite)
         return pResponse
+    
+    # allow context management as to be used in "with basepapi() as papi :"
+    def __enter__(self) :
+        return self
+    
+    def __exit__(self, *args, **kwargs):
+        if self.connected :
+            self.disconnect()

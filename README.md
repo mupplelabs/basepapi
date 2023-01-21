@@ -39,6 +39,13 @@ except papi.papiError as e:
 else :
     print(mySession.body)
 ```
+Or in a papi context:
+```python
+from papi import basepapi
+with basepapi('192.168.188.93', 'user', 'password', timeout=15) as papi :
+    response = papi.get('/1/cluster/identity')
+print(mySession.body)
+```
 
 Output:
 

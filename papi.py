@@ -1,45 +1,113 @@
 #!/usr/bin/env python
-# BasePAPI Class for simple OneFS Platform API interaction
-#
-# To be used to simplify papi access from remote, without the need of a full SDK.
-# 
-# Requires: requests library
-# get requests: pip install requests
-# 
-# Example Usage: 
-# 
-# from papi import basepapi
-# papi = basepapi('ClusterIP', 'Username', 'Password') 
-# response = papi.get('/1/cluster/identity')
-# print(response.body)
-#
-# Output:
-# {u'logon': {u'motd_header': u'', u'motd': u''}, u'description': u'', u'name': u'joshuatree'}
-#
-# Supports: GET, HEAD, PUT, POST and DELETE operations against PlatformAPI Endpoints.
-# Leverages Session Authentication, hence best practice is to point it to a given Nodes IP Adress rather than a SmartConnect FQDN.
-#
-# Returns a PapiResponse Class, containing: Status Code, response headers, and JSON Body as dict. 
-#
-# More info see README.md
+"""
+BasePAPI - A simple OneFS Platform API interaction library.
+
+This module provides a lightweight interface for interacting with Dell PowerScale/Isilon
+clusters via the Platform API (PAPI), without requiring a full SDK installation.
+
+Requirements:
+    - requests library (install via: pip install requests)
+
+Example Usage:
+    from papi import basepapi
+    
+    papi = basepapi('ClusterIP', 'Username', 'Password')
+    response = papi.get('/1/cluster/identity')
+    print(response.body)
+    
+    # Output:
+    # {'logon': {'motd_header': '', 'motd': ''}, 'description': '', 'name': 'joshuatree'}
+
+Supported Operations:
+    GET, HEAD, PUT, POST, and DELETE against Platform API endpoints.
+
+Notes:
+    - Uses session-based authentication for efficiency
+    - Returns PapiResponse objects containing: status code, headers, and JSON body as dict
+
+For more information, see README.md
+"""
 
 import requests
 import json
+import http.client
+import urllib.error
+
+class PapiResponse(object):
+    """
+    PAPI Response Container
+    """
+
+    __slots__ = ("status", "headers", "body", "uri")
+
+    def __init__(self, status=None, headers=None, body=None, uri=None):
+        self.status = status
+        self.headers = headers
+        self.body = body
+        self.uri = uri
+
+    def __str__(self):
+        return "Status: {status}, Headers: {headers}, Body: {body}, URI: {uri}".format(
+            status=self.status,
+            headers=self.headers,
+            body=self.body,
+            uri=self.uri,
+        )
+
+    def __repr__(self):
+        return "PapiResponse(status={!r}, headers={!r}, body={!r}, uri={!r})".format(
+            self.status, self.headers, self.body, self.uri
+        )
+
+    def raise_for_status(self):
+        """Raise a `urllib.error.HTTPError` if the status code is not in the 2XX range.
+
+        This was implemented for symmetry with `requests.Response.raise_for_status(..)`.
+        """
+        if not (http.client.OK <= self.status < http.client.MULTIPLE_CHOICES):
+            raise PapiError(self.uri, self.status, self.body, self.headers)
+
+class PapiError(urllib.error.URLError):
+    def __init__(self, uri, status, body, headers):
+        self.uri = uri
+        self.status = status
+        self.body = body
+        self.headers = headers
+
+    def __repr__(self):
+        return "PapiError(uri={!r}, code={!r}, body={!r}, headers={!r})".format(
+            self.uri, self.status, self.body, self.headers
+        )
+
+    def __str__(self):
+        return "PapiError: {} returned {}\nBody: {}\nHeaders: {}".format(
+            self.uri,
+            self.status,
+            self.body,
+            self.headers,
+        )
+
+    # HTTPError alias to ease with cross-functional compatibility.
+    @property
+    def code(self):
+        return self.status
 
 class basepapi:
-    class PapiResponse :
-        def __init__(self, rObject) :
-            if isinstance(rObject, requests.models.Response) :
-                # private Respone Object Building Function
-                    self.status = rObject.status_code
-                    self.headers = rObject.headers
-                    try :                                   # validate the response body is a JSON      
-                        self.body = rObject.json()
-                    except :
-                        self.body = rObject.text         # not a JSON return the "text" as is
-            else :
-                raise TypeError("Input data of wrong type!")
-
+    """
+    A class for interacting with the OneFS Platform API (PAPI).
+    
+    Provides methods for authenticating and making REST API calls (GET, HEAD, PUT, POST, DELETE)
+    to Dell PowerScale/Isilon clusters using session-based authentication.
+    
+    Attributes:
+        HOST (str): The IP address or hostname of the cluster node.
+        port (int): The port number for PAPI connections (default 8080).
+        url (str): The base URL for API requests.
+        connected (bool): Connection state of the session.
+        services (list): List of authorized services for the current session.
+        papiService (str): The API service being used (platform or namespace).
+    """
+    
     class papiException(Exception) :
         pass
 
@@ -50,17 +118,6 @@ class basepapi:
                     self.text = str(rObject)
             else :
                 raise TypeError("Unhandled connection error condition occured!")
-
-    class papiError(papiException) :
-        def __init__(self, rObject) :
-            if isinstance(rObject, requests.models.HTTPError) :
-                    if isinstance(rObject.response.status_code, int) :
-                        self.status = rObject.response.status_code
-                    else :
-                        self.status = rObject
-                    self.text = str(rObject)
-            else :
-                raise TypeError("Unhandled HTTP Error condition occured!")
 
     def __init__(self, HOST, username, password, port=8080, timeout=15, secure=False, papiService = 'platform', papiAgent = 'basePAPI Client for Python'):
         # Data needed for Session Authentication:
@@ -96,14 +153,25 @@ class basepapi:
 
     # the public session connect, disconnect and Status Update functions go here:
 
-    def connect(self) : # Connect to PAPI and request an Auth Session Cookie
+    def connect(self):
+        """
+        Establish a session connection to the OneFS Platform API.
+        
+        Authenticates with the cluster using the credentials provided during initialization
+        and sets up CSRF token headers required for subsequent API calls.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, and body from
+                the authentication request.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
+        myurl = self.url + self.__sessionURL
         try:
-            response = self.__session.post(self.url + self.__sessionURL, data=json.dumps(self.__auth), timeout=self.__timeout)
-            response.raise_for_status()
+            response = self.__session.post(myurl, data=json.dumps(self.__auth), timeout=self.__timeout)
         except requests.exceptions.ConnectionError as e:
             raise self.papiConnectionError(e)
-        except requests.exceptions.HTTPError as e :
-            raise self.papiError(e)
         else :
             nHeader = { # add headers needed for CSRF support, without these we cannot use the session cookie for anything papi
                     'Origin': self.url,
@@ -112,41 +180,97 @@ class basepapi:
             self.__session.headers.update(nHeader)
             self.services = response.json()['services'] # load authorized services
             self.connected = True # set connection state
-            myStatus = self.PapiResponse(response)
+            myStatus = PapiResponse(
+            status=response.status_code, headers=response.headers, uri=myurl
+            )
+            try:
+                myStatus.body = response.json()
+            except ValueError:
+                pass
             return myStatus
 
-    def disconnect(self) : # in case we need a disconnect funtion... here we can disconnect from a Session
+    def disconnect(self):
+        """
+        Terminate the current session connection to the OneFS Platform API.
+        
+        Closes the authenticated session with the cluster and resets the connection state.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, and body from
+                the session deletion request.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails during disconnect.
+        """
+        myurl = self.url + self.__sessionURL
         try:
-            response = self.__session.delete(self.url + self.__sessionURL)
+            response = self.__session.delete(myurl)
         except requests.exceptions.ConnectionError as e:
             raise self.papiConnectionError(e)
-        except requests.exceptions.HTTPError as e :
-            raise self.papiError(e)
         else :
             self.connected = False
-            myStatus = self.PapiResponse(response)
+            myStatus = PapiResponse(
+            status=response.status_code, headers=response.headers, uri=myurl
+            )
+            try:
+                myStatus.body = response.json()
+            except ValueError:
+                pass
             return myStatus
 
-    def getStatus(self) : # get the current Sessions Status
+    def getStatus(self):
+        """
+        Get the current session status from the OneFS Platform API.
+        
+        Retrieves information about the current authenticated session including
+        session validity and authorized services.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, and body
+                with session status information.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
+        myurl = self.url + self.__sessionURL
         try:
-            response = self.__session.get(self.url + self.__sessionURL)
-            response.raise_for_status()
+            response = self.__session.get(myurl)
         except requests.exceptions.ConnectionError as e:
             raise self.papiConnectionError(e)
-        except requests.exceptions.HTTPError as e :
-            self.connected = False
-            raise self.papiError(e)
-        else :
-            myStatus = self.PapiResponse(response)
-            return myStatus
-    
+        myStatus = PapiResponse(
+            status=response.status_code, headers=response.headers, uri=myurl
+        )
+        try:
+            myStatus.body = response.json()
+        except ValueError:
+            pass
+        return myStatus
+
     # the private function that does the actual work...
 
     def __request(self, method, uri, body={}, args={}, headers={}, serviceOverwrite = None ) :
+        """
+        Execute an HTTP request against the OneFS Platform API.
+        
+        Args:
+            method: HTTP method to use (GET, PUT, POST, HEAD, DELETE).
+            uri: API endpoint URI to request.
+            body: Request body data to send as JSON. Defaults to empty dict.
+            args: Query parameters to append to the URL. Defaults to empty dict.
+            headers: Additional HTTP headers to include. Defaults to empty dict.
+            serviceOverwrite: Override the default API service ('platform' or 'namespace').
+                Defaults to None, which uses the session's default service.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, body, and URI.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
         # if not already connected create the session to OneFS
         if(not self.connected): # connect
             self.connect()
-        # create and send the request:
+        # create the request:
         thisService = {0: self.papiService, 1: serviceOverwrite}[serviceOverwrite in ['namespace', 'platform']] 
         myurl = self.url + thisService + uri
         if headers and isinstance(headers, dict) : # Add headers if specified... MUST be a dict!!!
@@ -154,44 +278,130 @@ class basepapi:
             # shall we validate the header format? and add error handling here?
         try: # Do the request.
             response = self.__session.request(method, url=myurl, params=args, json=body)
-            response.raise_for_status()
         except requests.exceptions.ConnectionError as e:
-            myStatus = self.papiConnectionError(e)
-            raise myStatus
-        except requests.exceptions.HTTPError as e :
-            if self.connected and e.response.status_code == 401 :
-                self.connected = False
-            myStatus = self.papiError(e)
-            raise myStatus
-        # clean up the response if successfull call
-        output = self.PapiResponse(response)
-        output.url = myurl
-        output.rheaders = self.__session.headers 
+            raise self.papiConnectionError(e)
+
+        # clean up the response 
+        output = PapiResponse(
+            status=response.status_code, headers=response.headers, uri=myurl
+        )
+
+        try:
+            output.body = response.json() # extract body json to dict
+        except ValueError:
+            pass    
+
         if headers and isinstance(headers, dict) : # Clean up API Call Specific Headers 
             for key in headers:
                 if key in self.__session.headers:
                     del self.__session.headers[key]
-        return output # extract body json to dict
+
+        return output 
 
     #   define actual methods for PUT, POST, GET, HEAD and DELETE
 
-    def get(self, uri, body=None, args=None, headers={}, serviceOverwrite=None): 
+    def get(self, uri, body=None, args=None, headers={}, serviceOverwrite=None):
+        """
+        Execute a GET request against the OneFS Platform API.
+        
+        Args:
+            uri: API endpoint URI to request.
+            body: Request body data to send as JSON. Defaults to None.
+            args: Query parameters to append to the URL. Defaults to None.
+            headers: Additional HTTP headers to include. Defaults to empty dict.
+            serviceOverwrite: Override the default API service ('platform' or 'namespace').
+                Defaults to None, which uses the session's default service.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, body, and URI.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
         pResponse = self.__request('GET', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def put(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+    def put(self, uri, body=None, args=None, headers={}, serviceOverwrite=None):
+        """
+        Execute a PUT request against the OneFS Platform API.
+        
+        Args:
+            uri: API endpoint URI to request.
+            body: Request body data to send as JSON. Defaults to None.
+            args: Query parameters to append to the URL. Defaults to None.
+            headers: Additional HTTP headers to include. Defaults to empty dict.
+            serviceOverwrite: Override the default API service ('platform' or 'namespace').
+                Defaults to None, which uses the session's default service.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, body, and URI.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
         pResponse = self.__request('PUT', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def head(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+    def head(self, uri, body=None, args=None, headers={}, serviceOverwrite=None):
+        """
+        Execute a HEAD request against the OneFS Platform API.
+        
+        Args:
+            uri: API endpoint URI to request.
+            body: Request body data to send as JSON. Defaults to None.
+            args: Query parameters to append to the URL. Defaults to None.
+            headers: Additional HTTP headers to include. Defaults to empty dict.
+            serviceOverwrite: Override the default API service ('platform' or 'namespace').
+                Defaults to None, which uses the session's default service.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, and URI.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
         pResponse = self.__request('HEAD', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def post(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+    def post(self, uri, body=None, args=None, headers={}, serviceOverwrite=None):
+        """
+        Execute a POST request against the OneFS Platform API.
+        
+        Args:
+            uri: API endpoint URI to request.
+            body: Request body data to send as JSON. Defaults to None.
+            args: Query parameters to append to the URL. Defaults to None.
+            headers: Additional HTTP headers to include. Defaults to empty dict.
+            serviceOverwrite: Override the default API service ('platform' or 'namespace').
+                Defaults to None, which uses the session's default service.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, body, and URI.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
         pResponse = self.__request('POST', uri, body, args, headers, serviceOverwrite)
         return pResponse
 
-    def delete(self, uri, body=None, args=None, headers={}, serviceOverwrite = None):
+    def delete(self, uri, body=None, args=None, headers={}, serviceOverwrite=None):
+        """
+        Execute a DELETE request against the OneFS Platform API.
+        
+        Args:
+            uri: API endpoint URI to request.
+            body: Request body data to send as JSON. Defaults to None.
+            args: Query parameters to append to the URL. Defaults to None.
+            headers: Additional HTTP headers to include. Defaults to empty dict.
+            serviceOverwrite: Override the default API service ('platform' or 'namespace').
+                Defaults to None, which uses the session's default service.
+        
+        Returns:
+            PapiResponse: Response object containing status code, headers, body, and URI.
+        
+        Raises:
+            papiConnectionError: If the connection to the cluster fails.
+        """
         pResponse = self.__request('DELETE', uri, body, args, headers, serviceOverwrite)
         return pResponse
     

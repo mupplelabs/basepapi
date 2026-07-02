@@ -2,18 +2,21 @@
 A simple OneFS PowerScale PAPI binding without the full SDK.
 
 ### Background
-When I write simple tools to gather data from PowerScale Clusters I usualy use only a handfull of actual API Calls.
+When I write simple tools to gather data from PowerScale Clusters I usually use only a handful of actual API Calls.
 For this I prefer addressing the Platform API (PAPI) directly rather than to bother with a full blown SDK and the Version dependencies and overhead that comes with it.
 You can call me oldfashioned. ;-)
 
 However if you are looking for the official PowerScale SDK go here: https://github.com/Isilon/isilon_sdk
+And here: https://www.dell.com/support/manuals/en-us/isilon-onefs/ifs_pub_onefs_api_reference
+or here: https://developer.dell.com/apis/4088/versions/9.5.0/docs/1introduction.md
 
 ### Features:
 
-- Supports: GET, HEAD, PUT, POST and DELETE operations against PowerScale / Isilons REST API Endpoints.
-- Supports: REST access to system management (platform) as well as namespace ressources
-- Leverages Session Authentication, hence best practice is to point it to a given Nodes IP Adress rather than a SmartConnect FQDN
-- Returns a PapiResponse Class, containing: Status Code, response headers, and JSON Body as dict. auth session handling
+- Supports: GET, HEAD, PUT, POST and DELETE operations against PowerScale / Isilon's REST API Endpoints.
+- Supports: REST access to system management (platform) as well as namespace resources
+- Leverages Session Authentication, hence best practice is to point it to a given Node's IP Address rather than a SmartConnect FQDN
+- Returns a PapiResponse Class, containing: Status Code, response headers, and JSON Body as dict
+- Automatic session management with context manager support
 
 ### How to integrate:
 
@@ -32,82 +35,91 @@ from papi import basepapi
 papi = basepapi('192.168.188.93', 'user', 'password', timeout=15) 
 try: 
    response = papi.get('/1/cluster/identity')
+   response.raise_for_status()
 except papi.papiConnectionError as e:
     print('Connection Error: %s' % e)
 except papi.papiError as e:
     print('PAPI Error: %s' % e)
-else :
+else:
     print(response.body)
 ```
-Or in a papi context:
+Or using a context manager:
 ```python
 from papi import basepapi
-with basepapi('192.168.188.93', 'user', 'password', timeout=15) as papi :
+with basepapi('192.168.188.93', 'user', 'password', timeout=15) as papi:
     response = papi.get('/1/cluster/identity')
-print(reponse.body)
+    print(response.body)
 ```
 
 Output:
 
 ```
-{u'logon': {u'motd_header': u'', u'motd': u''}, u'description': u'', u'name': u'joshuatree'}	
+{'logon': {'motd_header': '', 'motd': ''}, 'description': '', 'name': 'joshuatree'}
 ```
 
 ### basepapi class internal structure:
 
 ```
-{
-#   class basepapi(builtins.object)
+class basepapi(builtins.object)
 
-#   initialize with:
-       papi(HOST, username, password, port=8080, timeout=15, secure=False, papiService='platform')
+   Initialize with:
+       basepapi(HOST, username, password, port=8080, timeout=15, secure=False, papiService='platform')
 
-           'HOST'          :                           <type 'str'>,  # Stores the HOST / IP / FQDN of a PAPI Instance
-           'username'      :                           username - user requires ISI_PRIV_LOGIN_PAPI and ISI_PRIV_NS_IFS_ACCESS RBAC permissions
-           'password'      :                           password 
-                           :                           NOTE: Username and password are stored in a dict (self.__auth) and only used during session setup.
-           'timeout'       :                           <type 'int'>,  # Connection timeout (stored in self.__timeout)
-           'papiService'   :                           <type 'str'>,  # stores PAPI Service to connect to must be either 'platform' (default) or 'namespace'
-           'port'          :                           <type 'int'>,  # papi Port default: 8080
+       Parameters:
+           'HOST'          : <str>   # Hostname / IP / FQDN of a PAPI Instance
+           'username'      : <str>   # User requires ISI_PRIV_LOGIN_PAPI and ISI_PRIV_NS_IFS_ACCESS RBAC permissions
+           'password'      : <str>   # Password (stored securely, only used during session setup)
+           'timeout'       : <int>   # Connection timeout in seconds (default: 15)
+           'papiService'   : <str>   # PAPI Service: 'platform' (default) or 'namespace'
+           'port'          : <int>   # PAPI Port (default: 8080)
+           'secure'        : <bool>  # SSL certificate verification (default: False)
   
-#   State Variables:
-
-       'url'               :                           <type 'str'>,  # stores https url derived from HOST and port variable.
-       'connected'         :                           <type 'bool'>, # stores connection state
-       'services'          :                           <type 'list'>, # list of services a session is authorized to access ['platform', 'namespace']
+   Properties:
+       'url'               : <str>   # HTTPS URL derived from HOST and port
+       'connected'         : <bool>  # Connection state
+       'services'          : <list>  # Services authorized for session ['platform', 'namespace']
    
-#   Methods:
+   Methods:
 
-#   Session Setup and Management:
-       connect(self)       :                           # create a authenticated session and request a session cookie
-       getStatus(self)     :                           # reads Session state from PAPI Endpoint
-       disconnect(self)    :                           # disconnects from a PAPI Session
+   Session Management:
+       connect()           : Create authenticated session and obtain session cookie
+       getStatus()         : Read session state from PAPI Endpoint
+       disconnect()        : Disconnect from PAPI session
 
-#   http function wrappers:
-       get(self, uri, body=None, args=None)          
-       head(self, uri, body=None, args=None)         
-       post(self, uri, body=None, args=None)
-       put(self, uri, body=None, args=None)
-       delete(self, uri, body=None, args=None)
-}
+   HTTP Methods:
+       get(uri, body=None, args=None)     : HTTP GET request
+       head(uri, body=None, args=None)    : HTTP HEAD request
+       post(uri, body=None, args=None)    : HTTP POST request
+       put(uri, body=None, args=None)     : HTTP PUT request
+       delete(uri, body=None, args=None)  : HTTP DELETE request
+
+   Context Manager:
+       __enter__()         : Automatically connect on context entry
+       __exit__()          : Automatically disconnect on context exit
+```
+
+### PapiResponse
 
 ```
-### Papi Response 
+class PapiResponse:
+    body        : <dict>                                    # JSON response body
+    headers     : <requests.structures.CaseInsensitiveDict> # Request headers sent
+    rheaders    : <requests.structures.CaseInsensitiveDict> # Response headers received
+    status      : <int>                                     # HTTP status code
+    url         : <str>                                     # Request URL
 ```
-	body 		<class 'requests.structures.CaseInsensitiveDict'>
-	headers 	<class 'requests.structures.CaseInsensitiveDict'>
-	rheaders 	<class 'requests.structures.CaseInsensitiveDict'>
-	status 		<class 'int'>
-	url 		<class 'str'>
+
+### Exception Handling
+
 ```
-### Exception handling
+papiConnectionError : Catches generic connection errors (network, timeout, etc.)
+papiException       : Catches any non-connection or non-HTTP related exceptions
+papiError           : Catches HTTP errors as exceptions (4xx, 5xx responses)
 ```
-	papiConnectionError = <class 'papi.papi.papiConnectionError'>   => Catches generic connection errors 
-	papiException = <class 'papi.papi.papiException'>               => Cathes any non connecton or non HTTP related exceptions 
-	papiError = <class 'papi.papi.papiError'>                       => catches HTTP Errors as exception
-```
-Responses and Exceptions inherited from requests library.
+
+Responses and Exceptions are inherited from the requests library.
 
 ### TODO(s):
 
-- more testing
+- More testing
+- Add retry logic for transient failures

@@ -35,7 +35,16 @@ import urllib.error
 
 class PapiResponse(object):
     """
-    PAPI Response Container
+    Container for OneFS Platform API responses.
+    
+    Stores the HTTP response data from PAPI calls including status code,
+    headers, response body, and the request URI.
+    
+    Attributes:
+        status (int): HTTP status code of the response.
+        headers (dict): HTTP response headers.
+        body (dict): JSON response body parsed as a dictionary.
+        uri (str): The URI that was requested.
     """
 
     __slots__ = ("status", "headers", "body", "uri")
@@ -60,14 +69,32 @@ class PapiResponse(object):
         )
 
     def raise_for_status(self):
-        """Raise a `urllib.error.HTTPError` if the status code is not in the 2XX range.
-
-        This was implemented for symmetry with `requests.Response.raise_for_status(..)`.
+        """
+        Raise a PapiError if the response status code indicates an error.
+        
+        Checks if the HTTP status code is outside the successful 2XX range
+        and raises a PapiError exception if so. This method provides symmetry
+        with requests.Response.raise_for_status() for consistent error handling.
+        
+        Raises:
+            PapiError: If the status code is not in the 2XX range (200-299).
         """
         if not (http.client.OK <= self.status < http.client.MULTIPLE_CHOICES):
             raise PapiError(self.uri, self.status, self.body, self.headers)
 
 class PapiError(urllib.error.URLError):
+    """
+    Exception raised when a PAPI request returns an error status code.
+    
+    This exception is raised by PapiResponse.raise_for_status() when the HTTP
+    status code indicates an error (not in the 2XX range).
+    
+    Attributes:
+        uri (str): The URI that was requested.
+        status (int): HTTP status code of the response.
+        body (dict): JSON response body parsed as a dictionary.
+        headers (dict): HTTP response headers.
+    """
     def __init__(self, uri, status, body, headers):
         self.uri = uri
         self.status = status
@@ -108,10 +135,12 @@ class basepapi:
         papiService (str): The API service being used (platform or namespace).
     """
     
-    class papiException(Exception) :
+    class PapiException(Exception):
+        """Base exception class for all PAPI-related errors."""
         pass
 
-    class papiConnectionError(papiException) :
+    class PapiConnectionError(PapiException) :
+        """Exception raised when a connection to the OneFS cluster fails."""
         def __init__(self, rObject) :
             if isinstance(rObject, requests.models.ConnectionError) :
                     self.status = rObject
@@ -165,13 +194,15 @@ class basepapi:
                 the authentication request.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         myurl = self.url + self.__sessionURL
         try:
             response = self.__session.post(myurl, data=json.dumps(self.__auth), timeout=self.__timeout)
         except requests.exceptions.ConnectionError as e:
-            raise self.papiConnectionError(e)
+            raise self.PapiConnectionError(e)
+        except Exception as e:
+            raise self.PapiException(e)
         else :
             nHeader = { # add headers needed for CSRF support, without these we cannot use the session cookie for anything papi
                     'Origin': self.url,
@@ -200,13 +231,15 @@ class basepapi:
                 the session deletion request.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails during disconnect.
+            PapiConnectionError: If the connection to the cluster fails during disconnect.
         """
         myurl = self.url + self.__sessionURL
         try:
             response = self.__session.delete(myurl)
         except requests.exceptions.ConnectionError as e:
-            raise self.papiConnectionError(e)
+            raise self.PapiConnectionError(e)
+        except Exception as e:
+            raise self.PapiException(e)
         else :
             self.connected = False
             myStatus = PapiResponse(
@@ -230,13 +263,15 @@ class basepapi:
                 with session status information.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         myurl = self.url + self.__sessionURL
         try:
             response = self.__session.get(myurl)
         except requests.exceptions.ConnectionError as e:
-            raise self.papiConnectionError(e)
+            raise self.PapiConnectionError(e)
+        except Exception as e:
+            raise self.PapiException(e)
         myStatus = PapiResponse(
             status=response.status_code, headers=response.headers, uri=myurl
         )
@@ -265,7 +300,7 @@ class basepapi:
             PapiResponse: Response object containing status code, headers, body, and URI.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         # if not already connected create the session to OneFS
         if(not self.connected): # connect
@@ -279,7 +314,9 @@ class basepapi:
         try: # Do the request.
             response = self.__session.request(method, url=myurl, params=args, json=body)
         except requests.exceptions.ConnectionError as e:
-            raise self.papiConnectionError(e)
+            raise self.PapiConnectionError(e)
+        except Exception as e:
+            raise self.PapiException(e)
 
         # clean up the response 
         output = PapiResponse(
@@ -316,7 +353,7 @@ class basepapi:
             PapiResponse: Response object containing status code, headers, body, and URI.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         pResponse = self.__request('GET', uri, body, args, headers, serviceOverwrite)
         return pResponse
@@ -337,7 +374,7 @@ class basepapi:
             PapiResponse: Response object containing status code, headers, body, and URI.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         pResponse = self.__request('PUT', uri, body, args, headers, serviceOverwrite)
         return pResponse
@@ -358,7 +395,7 @@ class basepapi:
             PapiResponse: Response object containing status code, headers, and URI.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         pResponse = self.__request('HEAD', uri, body, args, headers, serviceOverwrite)
         return pResponse
@@ -379,7 +416,7 @@ class basepapi:
             PapiResponse: Response object containing status code, headers, body, and URI.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         pResponse = self.__request('POST', uri, body, args, headers, serviceOverwrite)
         return pResponse
@@ -400,7 +437,7 @@ class basepapi:
             PapiResponse: Response object containing status code, headers, body, and URI.
         
         Raises:
-            papiConnectionError: If the connection to the cluster fails.
+            PapiConnectionError: If the connection to the cluster fails.
         """
         pResponse = self.__request('DELETE', uri, body, args, headers, serviceOverwrite)
         return pResponse

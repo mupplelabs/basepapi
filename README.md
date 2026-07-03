@@ -112,8 +112,8 @@ class PapiResponse:
 ### Exception Handling
 
 ```
-papiConnectionError : Catches generic connection errors (network, timeout, etc.)
-papiException       : Catches any non-connection or non-HTTP related exceptions
+PapiConnectionError : Catches generic connection errors (network, timeout, etc.)
+PapiException       : Catches any non-connection or non-HTTP related exceptions
 PapiError           : Catches HTTP errors as exceptions (4xx, 5xx responses)
 ```
 
